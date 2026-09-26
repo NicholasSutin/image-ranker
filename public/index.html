@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Image Ranker</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <nav class="menu" id="menu">
+    <button class="menu-btn" id="menu-btn" aria-label="Switch mode" aria-expanded="false" aria-controls="menu-pop">⋯</button>
+    <div class="menu-pop" id="menu-pop" hidden>
+      <a href="#tiers" data-mode="tiers">Tiers</a>
+      <a href="#compare" data-mode="compare">This or That</a>
+    </div>
+  </nav>
+
+  <main class="app">
+    <header>
+      <select id="set" aria-label="Image set"></select>
+      <span class="count" id="count"></span>
+    </header>
+
+    <div class="mode" id="mode-tiers" hidden>
+      <section class="stage" id="stage">
+        <img class="card" id="card" alt="" draggable="false" hidden>
+        <div class="board" id="board">
+          <div class="tier" data-tier="S"><span class="label">S</span><div class="thumbs"></div></div>
+          <div class="tier" data-tier="A"><span class="label">A</span><div class="thumbs"></div></div>
+          <div class="tier" data-tier="B"><span class="label">B</span><div class="thumbs"></div></div>
+          <div class="tier" data-tier="X"><span class="label">Don't put on site</span><div class="thumbs"></div></div>
+        </div>
+      </section>
+      <footer>
+        <button class="link-btn" id="undo" disabled>Undo</button>
+        <span class="hint" id="hint">Hold the image, drop it in a row</span>
+        <a class="link-btn results-link" href="/results">Results →</a>
+      </footer>
+    </div>
+
+    <div class="mode" id="mode-compare" hidden>
+      <section class="pair" id="pair">
+        <button class="choice" data-side="0" aria-label="Pick this one"><img alt=""></button>
+        <button class="choice" data-side="1" aria-label="Pick that one"><img alt=""></button>
+      </section>
+      <footer>
+        <button class="link-btn" id="skip">Skip</button>
+        <a class="link-btn results-link" href="/results">Results →</a>
+      </footer>
+    </div>
+  </main>
+</body>
+</html>

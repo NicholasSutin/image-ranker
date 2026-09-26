@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "image-ranker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+
+  // Every request (including images) goes through the Worker so it can enforce the login.
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+
+  "vars": {
+    // PLACEHOLDER: your real Turnstile site key (public). Local dev uses the test key from .dev.vars.
+    // Secrets (ACCESS_CODE, SESSION_SECRET, TURNSTILE_SECRET_KEY): `npx wrangler secret put <NAME>`.
+    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+  },
+
+  // Resizes the (huge) originals on the fly: see resized() in src/index.js.
+  "images": { "binding": "IMAGES" },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "image-ranker",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID" // from `npx wrangler d1 create image-ranker`
+    }
+  ],
+
+  "ratelimits": [
+    // Login attempts per IP: 5 / minute (Turnstile is also required on every attempt).
+    { "name": "LOGIN_LIMITER", "namespace_id": "2601", "simple": { "limit": 5, "period": 60 } },
+    // Votes per session: 30 / 10 seconds — generous for humans, stops scripted spam.
+    { "name": "VOTE_LIMITER", "namespace_id": "2602", "simple": { "limit": 30, "period": 10 } }
+  ]
+}

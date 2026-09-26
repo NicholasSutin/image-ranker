@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Enter code</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/login.js" defer></script>
+</head>
+<body>
+  <main class="login">
+    <form id="form" autocomplete="off">
+      <h1>Enter code</h1>
+      <p>5 digits</p>
+      <div class="digits" id="digits">
+        <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1" autofocus>
+        <input inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 2">
+        <input inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 3">
+        <input inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 4">
+        <input inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 5">
+      </div>
+      <div id="turnstile"></div>
+      <div class="error" id="error" role="alert"></div>
+    </form>
+  </main>
+</body>
+</html>

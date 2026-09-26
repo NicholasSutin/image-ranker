@@ -1,0 +1,257 @@
+import manifest from "./manifest.json";
+
+const COOKIE = "session";
+const SESSION_DAYS = 30;
+// Reachable without a session (the login page itself).
+const PUBLIC_PATHS = new Set(["/login", "/login.html", "/style.css", "/login.js"]);
+
+// Widths the client may request via /images/...?w=<width>. Allowlisted so the number of
+// unique (billed) transformations stays bounded: thumbnails and on-screen display.
+const IMAGE_WIDTHS = new Set(["160", "1600"]);
+
+const REQUIRED_CONFIG = ["ACCESS_CODE", "SESSION_SECRET", "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"];
+
+export default {
+  async fetch(request, env, ctx) {
+    const missing = REQUIRED_CONFIG.filter((k) => !env[k] || env[k].startsWith("REPLACE_WITH"));
+    if (missing.length) {
+      return new Response(`Missing config: ${missing.join(", ")}. See .dev.vars.example.`, { status: 500 });
+    }
+
+    const url = new URL(request.url);
+    const { pathname } = url;
+
+    if (pathname === "/login") return loginPage(request, env);
+    if (pathname === "/api/login" && request.method === "POST") return login(request, env);
+    if (pathname === "/api/logout" && request.method === "POST") return logout();
+    if (PUBLIC_PATHS.has(pathname)) return env.ASSETS.fetch(request);
+
+    const session = await readSession(request, env);
+    if (!session) {
+      if (pathname.startsWith("/api/")) return json({ error: "unauthorized" }, 401);
+      return Response.redirect(new URL("/login", url), 302);
+    }
+
+    if (pathname.startsWith("/images/") && url.searchParams.has("w")) return resized(url, env, ctx);
+    if (pathname === "/api/manifest") return json(manifest);
+    if (pathname === "/api/vote" && request.method === "POST") return vote(request, env, session);
+    if (pathname === "/api/results") return results(url, env);
+    if (pathname === "/api/tiers") return myTiers(url, env, session);
+    if (pathname === "/api/tier" && request.method === "POST") return setTier(request, env, session);
+
+    const res = await env.ASSETS.fetch(request);
+    // Gated content must never land in a shared cache.
+    const out = new Response(res.body, res);
+    // Images can sit in the browser cache; page code must revalidate so updates show up immediately.
+    out.headers.set("Cache-Control", pathname.startsWith("/images/") ? "private, max-age=3600" : "private, no-cache");
+    return out;
+  },
+};
+
+// ---------- auth ----------
+
+async function loginPage(request, env) {
+  if (await readSession(request, env)) return Response.redirect(new URL("/", request.url), 302);
+  const res = await env.ASSETS.fetch(new URL("/login", request.url));
+  return new HTMLRewriter()
+    .on("#turnstile", { element: (el) => el.setAttribute("data-sitekey", env.TURNSTILE_SITE_KEY) })
+    .transform(res);
+}
+
+async function login(request, env) {
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const { success } = await env.LOGIN_LIMITER.limit({ key: ip });
+  if (!success) return json({ error: "Too many attempts. Wait a minute." }, 429);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Bad request" }, 400);
+  }
+
+  if (!(await verifyTurnstile(body.token, ip, env))) {
+    return json({ error: "Verification failed. Try again.", resetTurnstile: true }, 403);
+  }
+
+  const code = String(body.code ?? "").replace(/\D/g, "");
+  if (!(await safeEqual(code, env.ACCESS_CODE.replace(/\D/g, "")))) {
+    return json({ error: "Wrong code.", resetTurnstile: true }, 403);
+  }
+
+  const cookie = await createSession(env);
+  return json({ ok: true }, 200, { "Set-Cookie": cookie });
+}
+
+function logout() {
+  return json({ ok: true }, 200, {
+    "Set-Cookie": `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+  });
+}
+
+async function verifyTurnstile(token, ip, env) {
+  if (typeof token !== "string" || !token) return false;
+  const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: ip }),
+  });
+  const data = await res.json();
+  return data.success === true;
+}
+
+// Cookie format: <sessionId>.<expiresAtSeconds>.<hmac>
+async function createSession(env) {
+  const id = crypto.randomUUID();
+  const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
+  const sig = await hmac(env.SESSION_SECRET, `${id}.${exp}`);
+  return `${COOKIE}=${id}.${exp}.${sig}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`;
+}
+
+async function readSession(request, env) {
+  const match = (request.headers.get("Cookie") ?? "").match(/(?:^|;\s*)session=([^;]+)/);
+  if (!match) return null;
+  const [id, exp, sig] = match[1].split(".");
+  if (!id || !exp || !sig || Number(exp) < Date.now() / 1000) return null;
+  const expected = await hmac(env.SESSION_SECRET, `${id}.${exp}`);
+  return (await safeEqual(sig, expected)) ? id : null;
+}
+
+async function hmac(secret, data) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/[+/=]/g, (c) => ({ "+": "-", "/": "_", "=": "" })[c]);
+}
+
+async function safeEqual(a, b) {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  return crypto.subtle.timingSafeEqual(ha, hb);
+}
+
+// ---------- voting ----------
+
+async function vote(request, env, session) {
+  const { success } = await env.VOTE_LIMITER.limit({ key: session });
+  if (!success) return json({ error: "Slow down." }, 429);
+
+  const { set, winner, loser } = await request.json().catch(() => ({}));
+  const images = manifest[set];
+  if (!images || winner === loser || !images.includes(winner) || !images.includes(loser)) {
+    return json({ error: "Invalid vote" }, 400);
+  }
+
+  await env.DB.prepare("INSERT INTO votes (set_name, winner, loser, session) VALUES (?, ?, ?, ?)")
+    .bind(set, winner, loser, session)
+    .run();
+  return json({ ok: true });
+}
+
+// ---------- images ----------
+
+// Downscaled WebP of an original. Only reached after the session check, so the edge cache
+// entry (keyed by the full URL) is never served to a logged-out visitor.
+async function resized(url, env, ctx) {
+  const width = url.searchParams.get("w");
+  if (!IMAGE_WIDTHS.has(width)) return new Response("Unsupported width", { status: 400 });
+
+  const cache = caches.default;
+  const key = new Request(url.toString());
+  let res = await cache.match(key);
+  if (!res) {
+    const original = await env.ASSETS.fetch(new URL(url.pathname, url));
+    if (!original.ok) return original;
+    const out = await env.IMAGES.input(original.body)
+      .transform({ width: Number(width), fit: "scale-down" })
+      .output({ format: "image/webp", quality: 82 });
+    res = out.response({ headers: { "Cache-Control": "public, max-age=31536000, immutable" } });
+    ctx.waitUntil(cache.put(key, res.clone()));
+  }
+  const out = new Response(res.body, res);
+  out.headers.set("Cache-Control", "private, max-age=86400");
+  return out;
+}
+
+// ---------- tiers ----------
+
+const TIERS = ["S", "A", "B", "X"]; // X = don't put on site
+
+async function myTiers(url, env, session) {
+  const set = url.searchParams.get("set");
+  if (!manifest[set]) return json({ error: "Unknown set" }, 404);
+  const { results: rows } = await env.DB.prepare(
+    "SELECT image, tier FROM tiers WHERE set_name = ? AND session = ?",
+  )
+    .bind(set, session)
+    .all();
+  return json(Object.fromEntries(rows.map((r) => [r.image, r.tier])));
+}
+
+// tier: null clears the image's tier (used by undo).
+async function setTier(request, env, session) {
+  const { success } = await env.VOTE_LIMITER.limit({ key: session });
+  if (!success) return json({ error: "Slow down." }, 429);
+
+  const { set, image, tier } = await request.json().catch(() => ({}));
+  if (!manifest[set]?.includes(image) || (tier !== null && !TIERS.includes(tier))) {
+    return json({ error: "Invalid tier" }, 400);
+  }
+
+  const stmt =
+    tier === null
+      ? env.DB.prepare("DELETE FROM tiers WHERE set_name = ? AND session = ? AND image = ?").bind(set, session, image)
+      : env.DB.prepare(
+          `INSERT INTO tiers (set_name, session, image, tier) VALUES (?, ?, ?, ?)
+           ON CONFLICT (set_name, session, image) DO UPDATE SET tier = excluded.tier, updated_at = unixepoch()`,
+        ).bind(set, session, image, tier);
+  await stmt.run();
+  return json({ ok: true });
+}
+
+async function results(url, env) {
+  const set = url.searchParams.get("set");
+  const images = manifest[set];
+  if (!images) return json({ error: "Unknown set" }, 404);
+
+  const [{ results: votes }, { results: tierCounts }] = await env.DB.batch([
+    env.DB.prepare("SELECT winner, loser FROM votes WHERE set_name = ? ORDER BY id").bind(set),
+    env.DB.prepare("SELECT image, tier, COUNT(*) AS n FROM tiers WHERE set_name = ? GROUP BY image, tier").bind(set),
+  ]);
+
+  // Elo over the full vote history, plus raw win/loss counts.
+  const stats = Object.fromEntries(images.map((src) => [src, { src, elo: 1500, wins: 0, losses: 0, tiers: { S: 0, A: 0, B: 0, X: 0 } }]));
+  for (const { image, tier, n } of tierCounts) {
+    if (stats[image]) stats[image].tiers[tier] = n;
+  }
+  for (const { winner, loser } of votes) {
+    const w = stats[winner];
+    const l = stats[loser];
+    if (!w || !l) continue; // image was removed from the set since
+    const expected = 1 / (1 + 10 ** ((l.elo - w.elo) / 400));
+    const delta = 32 * (1 - expected);
+    w.elo += delta;
+    l.elo -= delta;
+    w.wins++;
+    l.losses++;
+  }
+
+  const ranked = Object.values(stats)
+    .map((s) => ({ ...s, elo: Math.round(s.elo) }))
+    .sort((a, b) => b.elo - a.elo);
+  return json({ set, totalVotes: votes.length, ranked });
+}
+
+function json(data, status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers },
+  });
+}

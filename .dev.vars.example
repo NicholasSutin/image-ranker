@@ -1,0 +1,14 @@
+# Copy to .dev.vars for local dev (`cp .dev.vars.example .dev.vars`). Never commit .dev.vars.
+# In production, set each of these with `npx wrangler secret put <NAME>`
+# (TURNSTILE_SITE_KEY is public: set it in wrangler.jsonc "vars" instead).
+
+# The 5-digit access code.
+ACCESS_CODE=00000
+
+# Long random string used to sign session cookies: `openssl rand -hex 32`
+SESSION_SECRET=replace-with-long-random-string
+
+# Turnstile keys. The values below are Cloudflare's always-pass TEST keys and work on
+# localhost. Real keys come from Dashboard → Turnstile → Add widget.
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA

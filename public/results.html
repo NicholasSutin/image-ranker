@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Results</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/results.js" defer></script>
+</head>
+<body>
+  <main class="results">
+    <a class="link-btn" href="/">← Back</a>
+    <h1 id="title">Results</h1>
+    <section id="tier-results" hidden>
+      <h2>Tiers</h2>
+      <p class="count" id="tier-summary"></p>
+      <div class="board open static" id="tier-board"></div>
+      <h2>This or That</h2>
+    </section>
+    <p class="count" id="summary"></p>
+    <ol id="list"></ol>
+  </main>
+  <dialog class="viewer" id="viewer" aria-label="Enlarged image">
+    <img alt="">
+    <p class="caption"></p>
+    <button class="viewer-nav prev" id="viewer-prev" aria-label="Previous image">‹</button>
+    <button class="viewer-nav next" id="viewer-next" aria-label="Next image">›</button>
+  </dialog>
+</body>
+</html>
