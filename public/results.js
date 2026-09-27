@@ -18,6 +18,8 @@ const favDone = document.getElementById("fav-done");
 const favEdit = document.getElementById("fav-edit");
 
 const fileName = (src) => decodeURIComponent(src.split("/").pop());
+// Resized at build time by scripts/build-manifest.mjs; the originals are huge and aren't deployed.
+const sized = (src, width) => src.replace(/^\/images\//, `/sized/${width}/`).replace(/\.[^./]+$/, ".webp");
 
 (async () => {
   const params = new URLSearchParams(location.search);
@@ -70,7 +72,7 @@ function tile(item, title = fileName(item.src)) {
   el.className = "tile";
   el.classList.toggle("mine", mine.has(item.src));
   const img = document.createElement("img");
-  img.src = `${item.src}?w=800`;
+  img.src = sized(item.src, 800);
   img.loading = "lazy";
   img.alt = fileName(item.src);
   img.title = title;
@@ -335,13 +337,13 @@ function show(i) {
   const item = items.get(src);
   const name = decodeURIComponent(src.split("/").pop());
   // Show the already-loaded thumbnail instantly, then swap in the large version.
-  viewerImg.src = `${src}?w=800`;
+  viewerImg.src = sized(src, 800);
   viewerImg.alt = name;
   const large = new Image();
   large.onload = () => { if (viewerImg.alt === name) viewerImg.src = large.src; };
-  large.src = `${src}?w=1600`;
+  large.src = sized(src, 1600);
   // Warm the neighbours so stepping through is instant.
-  for (const n of [seq[i - 1], seq[i + 1]]) if (n) new Image().src = `${n}?w=1600`;
+  for (const n of [seq[i - 1], seq[i + 1]]) if (n) new Image().src = sized(n, 1600);
 
   const tier = item?.tier ? `Tier ${TIER_NAMES[item.tier]}` : "";
   caption.textContent = [`${i + 1} / ${seq.length} ${group}`, name, item?.starred && "★", tier, item && `Elo ${item.elo} (${item.wins}–${item.losses})`]

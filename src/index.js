@@ -6,10 +6,6 @@ const SESSION_DAYS = 30;
 // Reachable without a session (the login page itself).
 const PUBLIC_PATHS = new Set(["/login", "/login.html", "/style.css", "/login.js"]);
 
-// Widths the client may request via /images/...?w=<width>. Allowlisted so the number of
-// unique (billed) transformations stays bounded: thumbnails, results-page tiles, and on-screen display.
-const IMAGE_WIDTHS = new Set(["160", "800", "1600"]);
-
 const REQUIRED_CONFIG = ["ACCESS_CODE", "SESSION_SECRET", "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"];
 
 export default {
@@ -38,7 +34,6 @@ export default {
       return Response.redirect(loginUrl(url, invite), 302);
     }
 
-    if (pathname.startsWith("/images/") && url.searchParams.has("w")) return resized(url, env, ctx);
     if (pathname === "/api/manifest") return json(manifest);
     if (pathname === "/api/me") return me(env, user);
     if (pathname === "/api/ping" && request.method === "POST") return ping(env, user);
@@ -54,7 +49,7 @@ export default {
     // Gated content must never land in a shared cache.
     const out = new Response(res.body, res);
     // Images can sit in the browser cache; page code must revalidate so updates show up immediately.
-    out.headers.set("Cache-Control", pathname.startsWith("/images/") ? "private, max-age=3600" : "private, no-cache");
+    out.headers.set("Cache-Control", pathname.startsWith("/sized/") ? "private, max-age=3600" : "private, no-cache");
     return out;
   },
 };
@@ -269,31 +264,6 @@ async function vote(request, env, session) {
     .bind(set, winner, loser, session)
     .run();
   return json({ ok: true });
-}
-
-// ---------- images ----------
-
-// Downscaled WebP of an original. Only reached after the session check, so the edge cache
-// entry (keyed by the full URL) is never served to a logged-out visitor.
-async function resized(url, env, ctx) {
-  const width = url.searchParams.get("w");
-  if (!IMAGE_WIDTHS.has(width)) return new Response("Unsupported width", { status: 400 });
-
-  const cache = caches.default;
-  const key = new Request(url.toString());
-  let res = await cache.match(key);
-  if (!res) {
-    const original = await env.ASSETS.fetch(new URL(url.pathname, url));
-    if (!original.ok) return original;
-    const out = await env.IMAGES.input(original.body)
-      .transform({ width: Number(width), fit: "scale-down" })
-      .output({ format: "image/webp", quality: 82 });
-    res = out.response({ headers: { "Cache-Control": "public, max-age=31536000, immutable" } });
-    ctx.waitUntil(cache.put(key, res.clone()));
-  }
-  const out = new Response(res.body, res);
-  out.headers.set("Cache-Control", "private, max-age=86400");
-  return out;
 }
 
 // ---------- tiers ----------

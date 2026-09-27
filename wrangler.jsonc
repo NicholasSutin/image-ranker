@@ -13,19 +13,16 @@
   },
 
   "vars": {
-    // PLACEHOLDER: your real Turnstile site key (public). Local dev uses the test key from .dev.vars.
+    // Turnstile site key (public).
     // Secrets (ACCESS_CODE, SESSION_SECRET, TURNSTILE_SECRET_KEY): `npx wrangler secret put <NAME>`.
-    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFEu5kxkaTGzbA5u"
   },
-
-  // Resizes the (huge) originals on the fly: see resized() in src/index.js.
-  "images": { "binding": "IMAGES" },
 
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "image-ranker",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID" // from `npx wrangler d1 create image-ranker`
+      "database_id": "21267939-f01f-458e-af47-48a27c03eaa4"
     }
   ],
 

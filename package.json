@@ -10,6 +10,7 @@
     "db:init": "wrangler d1 migrations apply image-ranker --remote"
   },
   "devDependencies": {
+    "sharp": "^0.35.5",
     "wrangler": "^4.141.0"
   }
 }

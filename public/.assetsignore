@@ -1,0 +1,2 @@
+# Originals are only the source for public/sized/ (built by scripts/build-manifest.mjs); the pages never load them.
+images/

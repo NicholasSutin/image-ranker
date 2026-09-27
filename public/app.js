@@ -19,7 +19,8 @@ let locked = false;
 let revising = false; // chose "Revise" for this set: don't nag after every re-rank
 
 const name = (src) => decodeURIComponent(src.split("/").pop());
-const display = (src) => `${src}?w=1600`; // resized by the Worker; originals are huge
+// Resized at build time by scripts/build-manifest.mjs; the originals are huge and aren't deployed.
+const display = (src) => src.replace(/^\/images\//, "/sized/1600/").replace(/\.[^./]+$/, ".webp");
 
 function randomPair() {
   const images = manifest[set];

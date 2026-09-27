@@ -22,9 +22,10 @@ let onChange = () => {};
 let onDone = () => {};
 
 const name = (src) => decodeURIComponent(src.split("/").pop());
-// Resized by the Worker; the originals are far too big to drag around or show as thumbnails.
-const display = (src) => `${src}?w=1600`;
-const thumb = (src) => `${src}?w=160`;
+// Resized at build time by scripts/build-manifest.mjs; the originals are huge and aren't deployed.
+const sized = (src, width) => src.replace(/^\/images\//, `/sized/${width}/`).replace(/\.[^./]+$/, ".webp");
+const display = (src) => sized(src, 1600);
+const thumb = (src) => sized(src, 160);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function initTiers(opts) {
