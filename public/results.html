@@ -6,11 +6,27 @@
   <title>Results</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/results.js" defer></script>
+  <script src="/activity.js" defer></script>
 </head>
 <body>
   <main class="results">
-    <a class="link-btn" href="/">← Back</a>
+    <a class="link-btn" href="/?edit">← Back to ranking</a>
     <h1 id="title">Results</h1>
+    <p class="count" id="whoami"></p>
+    <nav class="people" id="people" aria-label="Whose results" hidden></nav>
+    <section class="person-card" id="person-card" hidden></section>
+    <div class="fav-prompt" id="fav-prompt" hidden>
+      <p><strong>You've ranked every image.</strong> Now pick your absolute favorites (at least 3).</p>
+      <button class="primary-btn" id="fav-start">Choose favorites</button>
+    </div>
+    <section id="starred" hidden>
+      <div class="section-head">
+        <h2>★ Starred</h2>
+        <button class="link-btn" id="fav-edit">Edit favorites</button>
+      </div>
+      <p class="count" id="starred-summary"></p>
+      <div class="gallery" id="starred-grid"></div>
+    </section>
     <section id="tier-results" hidden>
       <h2>Tiers</h2>
       <p class="count" id="tier-summary"></p>
@@ -20,6 +36,10 @@
     <p class="count" id="summary"></p>
     <ol id="list"></ol>
   </main>
+  <div class="fav-bar" id="fav-bar" hidden>
+    <span id="fav-count"></span>
+    <button class="primary-btn" id="fav-done" disabled>Done</button>
+  </div>
   <dialog class="viewer" id="viewer" aria-label="Enlarged image">
     <img alt="">
     <p class="caption"></p>

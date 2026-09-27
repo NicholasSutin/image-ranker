@@ -1,13 +1,14 @@
 import manifest from "./manifest.json";
 
-const COOKIE = "session";
+// Renamed from "session" when logins became per-person, so older anonymous cookies no longer work.
+const COOKIE = "user";
 const SESSION_DAYS = 30;
 // Reachable without a session (the login page itself).
 const PUBLIC_PATHS = new Set(["/login", "/login.html", "/style.css", "/login.js"]);
 
 // Widths the client may request via /images/...?w=<width>. Allowlisted so the number of
-// unique (billed) transformations stays bounded: thumbnails and on-screen display.
-const IMAGE_WIDTHS = new Set(["160", "1600"]);
+// unique (billed) transformations stays bounded: thumbnails, results-page tiles, and on-screen display.
+const IMAGE_WIDTHS = new Set(["160", "800", "1600"]);
 
 const REQUIRED_CONFIG = ["ACCESS_CODE", "SESSION_SECRET", "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"];
 
@@ -26,18 +27,28 @@ export default {
     if (pathname === "/api/logout" && request.method === "POST") return logout();
     if (PUBLIC_PATHS.has(pathname)) return env.ASSETS.fetch(request);
 
-    const session = await readSession(request, env);
-    if (!session) {
+    const user = await readSession(request, env);
+    const invite = url.searchParams.get("invite");
+    if (!user) {
       if (pathname.startsWith("/api/")) return json({ error: "unauthorized" }, 401);
-      return Response.redirect(new URL("/login", url), 302);
+      return Response.redirect(loginUrl(url, invite), 302);
+    }
+    // Someone else's invite link opened in this browser: let them say who they are.
+    if (invite && (pathname === "/" || pathname === "/results") && !(await isInvitee(env, user, invite))) {
+      return Response.redirect(loginUrl(url, invite), 302);
     }
 
     if (pathname.startsWith("/images/") && url.searchParams.has("w")) return resized(url, env, ctx);
     if (pathname === "/api/manifest") return json(manifest);
-    if (pathname === "/api/vote" && request.method === "POST") return vote(request, env, session);
-    if (pathname === "/api/results") return results(url, env);
-    if (pathname === "/api/tiers") return myTiers(url, env, session);
-    if (pathname === "/api/tier" && request.method === "POST") return setTier(request, env, session);
+    if (pathname === "/api/me") return me(env, user);
+    if (pathname === "/api/ping" && request.method === "POST") return ping(env, user);
+    if (pathname === "/api/vote" && request.method === "POST") return vote(request, env, user.id);
+    if (pathname === "/api/results") return results(url, env, user);
+    if (pathname === "/api/people") return people(url, env);
+    if (pathname === "/api/tiers") return myTiers(url, env, user.id);
+    if (pathname === "/api/tier" && request.method === "POST") return setTier(request, env, user.id);
+    if (pathname === "/api/star" && request.method === "POST") return setStar(request, env, user.id);
+    if (pathname === "/api/finish" && request.method === "POST") return finish(request, env, user.id);
 
     const res = await env.ASSETS.fetch(request);
     // Gated content must never land in a shared cache.
@@ -50,8 +61,26 @@ export default {
 
 // ---------- auth ----------
 
+function loginUrl(url, invite) {
+  const login = new URL("/login", url);
+  if (invite) login.searchParams.set("invite", invite);
+  return login;
+}
+
+// Names match case-insensitively and ignore extra spaces.
+const nameKey = (name) => name.trim().replace(/\s+/g, " ").toLowerCase();
+
+async function isInvitee(env, user, invite) {
+  const row = await env.DB.prepare("SELECT name_key FROM users WHERE id = ?").bind(user.id).first();
+  return row?.name_key === nameKey(invite);
+}
+
 async function loginPage(request, env) {
-  if (await readSession(request, env)) return Response.redirect(new URL("/", request.url), 302);
+  // Already signed in: skip the form, unless this is someone else's invite link.
+  const url = new URL(request.url);
+  const invite = url.searchParams.get("invite");
+  const user = await readSession(request, env);
+  if (user && (!invite || (await isInvitee(env, user, invite)))) return Response.redirect(new URL("/", url), 302);
   const res = await env.ASSETS.fetch(new URL("/login", request.url));
   return new HTMLRewriter()
     .on("#turnstile", { element: (el) => el.setAttribute("data-sitekey", env.TURNSTILE_SITE_KEY) })
@@ -70,6 +99,10 @@ async function login(request, env) {
     return json({ error: "Bad request" }, 400);
   }
 
+  const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
+  if (!name || name.length > 40) return json({ error: "Enter your name (up to 40 characters)." }, 400);
+  const invite = typeof body.invite === "string" && body.invite.trim() ? body.invite.trim().slice(0, 40) : null;
+
   if (!(await verifyTurnstile(body.token, ip, env))) {
     return json({ error: "Verification failed. Try again.", resetTurnstile: true }, 403);
   }
@@ -79,7 +112,21 @@ async function login(request, env) {
     return json({ error: "Wrong code.", resetTurnstile: true }, 403);
   }
 
-  const cookie = await createSession(env);
+  // The same name always maps to the same person, so progress follows them across devices.
+  await env.DB.prepare("INSERT INTO users (id, name, name_key, invite) VALUES (?, ?, ?, ?) ON CONFLICT (name_key) DO NOTHING")
+    .bind(crypto.randomUUID(), name, nameKey(name), invite)
+    .run();
+  const { id } = await env.DB.prepare("SELECT id FROM users WHERE name_key = ?").bind(nameKey(name)).first();
+  const cf = request.cf ?? {};
+  await env.DB.prepare(
+    `INSERT INTO logins (user_id, invite, city, region, country, latitude, longitude, timezone)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(id, invite, cf.city ?? null, cf.region ?? null, cf.country ?? null,
+      cf.latitude ? Number(cf.latitude) : null, cf.longitude ? Number(cf.longitude) : null, cf.timezone ?? null)
+    .run();
+
+  const cookie = await createSession(env, id);
   return json({ ok: true }, 200, { "Set-Cookie": cookie });
 }
 
@@ -99,21 +146,22 @@ async function verifyTurnstile(token, ip, env) {
   return data.success === true;
 }
 
-// Cookie format: <sessionId>.<expiresAtSeconds>.<hmac>
-async function createSession(env) {
-  const id = crypto.randomUUID();
+// Cookie format: <userId>.<expiresAtSeconds>.<hmac>
+async function createSession(env, id) {
   const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
-  const sig = await hmac(env.SESSION_SECRET, `${id}.${exp}`);
-  return `${COOKIE}=${id}.${exp}.${sig}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`;
+  const payload = `${id}.${exp}`;
+  const sig = await hmac(env.SESSION_SECRET, payload);
+  return `${COOKIE}=${payload}.${sig}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`;
 }
 
+// Returns { id } for a valid cookie, else null.
 async function readSession(request, env) {
-  const match = (request.headers.get("Cookie") ?? "").match(/(?:^|;\s*)session=([^;]+)/);
+  const match = (request.headers.get("Cookie") ?? "").match(new RegExp(`(?:^|;\\s*)${COOKIE}=([^;]+)`));
   if (!match) return null;
   const [id, exp, sig] = match[1].split(".");
   if (!id || !exp || !sig || Number(exp) < Date.now() / 1000) return null;
   const expected = await hmac(env.SESSION_SECRET, `${id}.${exp}`);
-  return (await safeEqual(sig, expected)) ? id : null;
+  return (await safeEqual(sig, expected)) ? { id } : null;
 }
 
 async function hmac(secret, data) {
@@ -135,6 +183,74 @@ async function safeEqual(a, b) {
     crypto.subtle.digest("SHA-256", enc.encode(b)),
   ]);
   return crypto.subtle.timingSafeEqual(ha, hb);
+}
+
+// ---------- people ----------
+
+async function me(env, user) {
+  const row = await env.DB.prepare("SELECT name FROM users WHERE id = ?").bind(user.id).first();
+  return json({ id: user.id, name: row?.name ?? null });
+}
+
+// Sent every ~20s while a page is in view. Only short gaps count, so time away isn't added.
+const MAX_PING_GAP = 60;
+
+async function ping(env, user) {
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `UPDATE users SET
+       active_seconds = active_seconds + CASE WHEN ?1 - last_seen_at BETWEEN 0 AND ?2 THEN ?1 - last_seen_at ELSE 0 END,
+       last_seen_at = ?1
+     WHERE id = ?3`,
+  )
+    .bind(now, MAX_PING_GAP, user.id)
+    .run();
+  return json({ ok: true });
+}
+
+// Everyone's progress in a set, for the person switcher on the results page.
+async function people(url, env) {
+  const set = url.searchParams.get("set");
+  const images = manifest[set];
+  if (!images) return json({ error: "Unknown set" }, 404);
+
+  const [{ results: users }, { results: logins }, { results: tiers }, { results: stars }, { results: votes }] =
+    await env.DB.batch([
+      env.DB.prepare("SELECT * FROM users ORDER BY created_at"),
+      env.DB.prepare("SELECT * FROM logins ORDER BY id DESC"),
+      env.DB.prepare("SELECT session, image FROM tiers WHERE set_name = ?").bind(set),
+      env.DB.prepare("SELECT session, image FROM stars WHERE set_name = ?").bind(set),
+      env.DB.prepare("SELECT session, COUNT(*) AS n FROM votes WHERE set_name = ? GROUP BY session").bind(set),
+    ]);
+
+  const inSet = new Set(images);
+  const count = (rows, id) => rows.filter((r) => r.session === id && inSet.has(r.image)).length;
+  return json({
+    total: images.length,
+    people: users.map((u) => ({
+      id: u.id,
+      name: u.name,
+      invite: u.invite,
+      startedAt: u.created_at,
+      finishedAt: u.finished_at,
+      lastSeenAt: u.last_seen_at,
+      activeSeconds: u.active_seconds,
+      tiered: count(tiers, u.id),
+      starred: count(stars, u.id),
+      votes: votes.find((v) => v.session === u.id)?.n ?? 0,
+      logins: logins
+        .filter((l) => l.user_id === u.id)
+        .map((l) => ({
+          at: l.created_at,
+          city: l.city,
+          region: l.region,
+          country: l.country,
+          latitude: l.latitude,
+          longitude: l.longitude,
+          timezone: l.timezone,
+        })),
+    })),
+  });
 }
 
 // ---------- voting ----------
@@ -216,20 +332,60 @@ async function setTier(request, env, session) {
   return json({ ok: true });
 }
 
-async function results(url, env) {
+// ---------- stars ----------
+
+async function setStar(request, env, session) {
+  const { success } = await env.VOTE_LIMITER.limit({ key: session });
+  if (!success) return json({ error: "Slow down." }, 429);
+
+  const { set, image, starred } = await request.json().catch(() => ({}));
+  if (!manifest[set]?.includes(image) || typeof starred !== "boolean") {
+    return json({ error: "Invalid star" }, 400);
+  }
+
+  const stmt = starred
+    ? env.DB.prepare("INSERT OR IGNORE INTO stars (set_name, session, image) VALUES (?, ?, ?)")
+    : env.DB.prepare("DELETE FROM stars WHERE set_name = ? AND session = ? AND image = ?");
+  await stmt.bind(set, session, image).run();
+  return json({ ok: true });
+}
+
+// Favorites confirmed: the end of the flow. Only the first time counts.
+async function finish(request, env, session) {
+  const { set } = await request.json().catch(() => ({}));
+  if (!manifest[set]) return json({ error: "Unknown set" }, 404);
+  const { n } = await env.DB.prepare("SELECT COUNT(*) AS n FROM stars WHERE set_name = ? AND session = ?")
+    .bind(set, session)
+    .first();
+  if (n < 3) return json({ error: "Pick at least 3 favorites" }, 400);
+  await env.DB.prepare("UPDATE users SET finished_at = COALESCE(finished_at, unixepoch()) WHERE id = ?").bind(session).run();
+  return json({ ok: true });
+}
+
+// ---------- results ----------
+
+// One person's own choices: yours by default, or anyone's via ?user=.
+async function results(url, env, user) {
   const set = url.searchParams.get("set");
   const images = manifest[set];
   if (!images) return json({ error: "Unknown set" }, 404);
+  const session = url.searchParams.get("user") || user.id;
 
-  const [{ results: votes }, { results: tierCounts }] = await env.DB.batch([
-    env.DB.prepare("SELECT winner, loser FROM votes WHERE set_name = ? ORDER BY id").bind(set),
-    env.DB.prepare("SELECT image, tier, COUNT(*) AS n FROM tiers WHERE set_name = ? GROUP BY image, tier").bind(set),
+  const [{ results: votes }, { results: tiers }, { results: stars }] = await env.DB.batch([
+    env.DB.prepare("SELECT winner, loser FROM votes WHERE set_name = ? AND session = ? ORDER BY id").bind(set, session),
+    env.DB.prepare("SELECT image, tier FROM tiers WHERE set_name = ? AND session = ?").bind(set, session),
+    env.DB.prepare("SELECT image FROM stars WHERE set_name = ? AND session = ?").bind(set, session),
   ]);
 
-  // Elo over the full vote history, plus raw win/loss counts.
-  const stats = Object.fromEntries(images.map((src) => [src, { src, elo: 1500, wins: 0, losses: 0, tiers: { S: 0, A: 0, B: 0, X: 0 } }]));
-  for (const { image, tier, n } of tierCounts) {
-    if (stats[image]) stats[image].tiers[tier] = n;
+  // Elo over this person's votes, plus raw win/loss counts.
+  const stats = Object.fromEntries(
+    images.map((src) => [src, { src, elo: 1500, wins: 0, losses: 0, tier: null, starred: false }]),
+  );
+  for (const { image, tier } of tiers) {
+    if (stats[image]) stats[image].tier = tier;
+  }
+  for (const { image } of stars) {
+    if (stats[image]) stats[image].starred = true;
   }
   for (const { winner, loser } of votes) {
     const w = stats[winner];

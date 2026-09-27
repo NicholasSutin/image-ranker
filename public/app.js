@@ -1,4 +1,4 @@
-import { initTiers, loadTiers, progress, tierKey } from "/tiers.js";
+import { allRanked, initTiers, loadTiers, progress, tierKey } from "/tiers.js";
 
 const setEl = document.getElementById("set");
 const countEl = document.getElementById("count");
@@ -72,7 +72,7 @@ function chooseSet(name) {
   try { localStorage.setItem("set", set); } catch {}
   current = null;
   show(randomPair());
-  loadTiers(set, manifest[set]);
+  return loadTiers(set, manifest[set]);
 }
 
 // ---------- modes ----------
@@ -129,5 +129,9 @@ document.addEventListener("keydown", (e) => {
   let saved = null;
   try { saved = localStorage.getItem("set"); } catch {}
   setEl.value = sets.includes(saved) ? saved : sets[0];
-  chooseSet(setEl.value);
+  await chooseSet(setEl.value);
+  // Already finished this set: land on the results so it doesn't look like progress was lost.
+  // "Back" on the results page links here with ?edit to get back to the board.
+  const edit = new URLSearchParams(location.search).has("edit");
+  if (!edit && mode === "tiers" && allRanked()) location.replace(`/results?set=${encodeURIComponent(set)}`);
 })();

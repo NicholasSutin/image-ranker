@@ -34,6 +34,10 @@ export function progress() {
   return images.length ? `${Object.keys(placed).length} / ${images.length} ranked` : "";
 }
 
+export function allRanked() {
+  return images.length > 0 && images.every((src) => placed[src]);
+}
+
 export async function loadTiers(setName, setImages) {
   set = setName;
   images = setImages;
