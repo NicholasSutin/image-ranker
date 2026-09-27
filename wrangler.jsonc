@@ -15,7 +15,11 @@
   "vars": {
     // Turnstile site key (public).
     // Secrets (ACCESS_CODE, SESSION_SECRET, TURNSTILE_SECRET_KEY): `npx wrangler secret put <NAME>`.
-    "TURNSTILE_SITE_KEY": "0x4AAAAAAFEu5kxkaTGzbA5u"
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFEu5kxkaTGzbA5u",
+    // Who can delete people and their results on the results page, and from where
+    // ("<country>-<region>" codes from Cloudflare's IP geolocation). Unset either to turn deleting off.
+    "ADMIN_NAME": "Nick",
+    "ADMIN_REGION": "US-CT"
   },
 
   "d1_databases": [

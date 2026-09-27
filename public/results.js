@@ -247,6 +247,27 @@ function renderPerson() {
   const heading = document.createElement("h2");
   heading.textContent = p.id === me.id ? `${p.name} (you)` : p.name;
   card.replaceChildren(heading, dl);
+
+  if (me.canDelete && p.id !== me.id) {
+    const del = document.createElement("button");
+    del.className = "link-btn danger";
+    del.textContent = `Delete ${p.name} and their results`;
+    del.addEventListener("click", () => deletePerson(p));
+    card.append(del);
+  }
+}
+
+async function deletePerson(p) {
+  if (!confirm(`Delete ${p.name}? Their tiers, favorites, votes and logins are removed for good.`)) return;
+  const res = await fetch("/api/delete-user", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: p.id }),
+  });
+  if (res.status === 401) return location.replace("/login");
+  if (!res.ok) return alert((await res.json().catch(() => ({}))).error || "Couldn't delete.");
+  await switchTo(me.id);
+  await loadPeople();
 }
 
 // ---------- favorites ----------

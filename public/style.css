@@ -6,6 +6,7 @@
   --line: #e2dfd8;
   --accent: #2f6df6;
   --win: #1f9d55;
+  --danger: #c93a2f;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -16,6 +17,7 @@
     --card: #1c1c1c;
     --line: #2d2d2d;
     --accent: #6b9bff;
+    --danger: #ff7b6e;
     color-scheme: dark;
   }
 }
@@ -366,6 +368,7 @@ header select {
 .person-card dt { color: var(--muted); }
 .person-card dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .person-card small { color: var(--muted); }
+.person-card .danger { margin-top: 12px; padding-left: 0; color: var(--danger); }
 @media (max-width: 599px) {
   .person-card dl { grid-template-columns: 1fr; gap: 0; }
   .person-card dd { margin-bottom: 8px; }

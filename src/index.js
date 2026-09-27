@@ -36,11 +36,12 @@ export default {
     }
 
     if (pathname === "/api/manifest") return json(manifest);
-    if (pathname === "/api/me") return me(env, user);
+    if (pathname === "/api/me") return me(request, env, user);
     if (pathname === "/api/ping" && request.method === "POST") return ping(env, user);
     if (pathname === "/api/vote" && request.method === "POST") return vote(request, env, user.id);
     if (pathname === "/api/results") return results(url, env, user);
     if (pathname === "/api/people") return people(url, env);
+    if (pathname === "/api/delete-user" && request.method === "POST") return deleteUser(request, env, user);
     if (pathname === "/api/tiers") return myTiers(url, env, user.id);
     if (pathname === "/api/tier" && request.method === "POST") return setTier(request, env, user.id);
     if (pathname === "/api/star" && request.method === "POST") return setStar(request, env, user.id);
@@ -197,9 +198,34 @@ async function safeEqual(a, b) {
 
 // ---------- people ----------
 
-async function me(env, user) {
+async function me(request, env, user) {
   const row = await env.DB.prepare("SELECT name FROM users WHERE id = ?").bind(user.id).first();
-  return json({ id: user.id, name: row?.name ?? null });
+  return json({ id: user.id, name: row?.name ?? null, canDelete: await canDelete(request, env, user) });
+}
+
+// Only ADMIN_NAME, and only from ADMIN_REGION ("<country>-<region>", matched against Cloudflare's
+// IP geolocation), can delete people. Leaving either unset turns deleting off.
+async function canDelete(request, env, user) {
+  if (!env.ADMIN_NAME || !env.ADMIN_REGION) return false;
+  const cf = request.cf ?? {};
+  if (`${cf.country}-${cf.regionCode}`.toUpperCase() !== env.ADMIN_REGION.toUpperCase()) return false;
+  return isInvitee(env, user, env.ADMIN_NAME);
+}
+
+// Removes a person and everything they did: votes, tiers, stars and logins.
+async function deleteUser(request, env, user) {
+  if (!(await canDelete(request, env, user))) return json({ error: "Not allowed" }, 403);
+  const { id } = await request.json().catch(() => ({}));
+  if (typeof id !== "string" || !id) return json({ error: "Missing user" }, 400);
+  if (id === user.id) return json({ error: "You can't delete yourself" }, 400);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM votes WHERE session = ?").bind(id),
+    env.DB.prepare("DELETE FROM tiers WHERE session = ?").bind(id),
+    env.DB.prepare("DELETE FROM stars WHERE session = ?").bind(id),
+    env.DB.prepare("DELETE FROM logins WHERE user_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id),
+  ]);
+  return json({ ok: true });
 }
 
 // Sent every ~20s while a page is in view. Only short gaps count, so time away isn't added.
