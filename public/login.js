@@ -1,7 +1,4 @@
 const inputs = [...document.querySelectorAll("#digits input")];
-const whoInvite = document.getElementById("who-invite");
-const whoName = document.getElementById("who-name");
-const codeStep = document.getElementById("code-step");
 const nameInput = document.getElementById("name");
 const errorEl = document.getElementById("error");
 const widgetEl = document.getElementById("turnstile");
@@ -30,47 +27,22 @@ turnstileScript.async = true;
 turnstileScript.onerror = () => { errorEl.textContent = "Couldn't load verification. Check your connection or ad blocker."; };
 document.head.append(turnstileScript);
 
-// ---------- who are you ----------
+// ---------- name ----------
 
 // Invite links look like /?invite=Farzana; the Worker passes the label through to /login.
+// Prefill it, but leave it editable in case someone else opened the link.
 const invite = (new URLSearchParams(location.search).get("invite") ?? "").trim().replace(/\s+/g, " ").slice(0, 40);
-let name = "";
+const name = () => nameInput.value.trim().replace(/\s+/g, " ");
 
-function step(el) {
-  for (const s of [whoInvite, whoName, codeStep]) s.hidden = s !== el;
-  errorEl.textContent = "";
-}
-
-function askName() {
-  step(whoName);
-  nameInput.focus();
-}
-
-function useName(n) {
-  name = n;
-  document.getElementById("hello-name").textContent = n;
-  step(codeStep);
-  inputs[0].focus();
-}
-
-if (invite) {
-  document.getElementById("invite-name").textContent = invite;
-  step(whoInvite);
-} else {
-  askName();
-}
-document.getElementById("who-yes").addEventListener("click", () => useName(invite));
-document.getElementById("who-no").addEventListener("click", askName);
-document.getElementById("not-me").addEventListener("click", () => {
-  nameInput.value = "";
-  askName();
+nameInput.value = invite;
+(invite ? inputs[0] : nameInput).focus();
+nameInput.addEventListener("input", () => { errorEl.textContent = ""; });
+nameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (name()) inputs[Math.min(code().length, inputs.length - 1)].focus();
+  }
 });
-
-function submitName() {
-  const n = nameInput.value.trim().replace(/\s+/g, " ");
-  if (!n) { errorEl.textContent = "Enter your name."; nameInput.focus(); return; }
-  useName(n);
-}
 
 // ---------- code ----------
 
@@ -101,6 +73,7 @@ inputs.forEach((input, i) => {
 
 async function maybeSubmit() {
   if (busy || code().length !== inputs.length) return;
+  if (!name()) { errorEl.textContent = "Enter your name."; nameInput.focus(); return; }
   if (!token) { errorEl.textContent = "Complete the check below."; return; }
   busy = true;
   errorEl.textContent = "";
@@ -108,7 +81,7 @@ async function maybeSubmit() {
     const res = await fetch("/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: code(), token, name, invite: invite || null }),
+      body: JSON.stringify({ code: code(), token, name: name(), invite: invite || null }),
     });
     if (res.ok) return location.replace("/");
     const data = await res.json().catch(() => ({}));
@@ -129,6 +102,5 @@ async function maybeSubmit() {
 
 document.getElementById("form").addEventListener("submit", (e) => {
   e.preventDefault();
-  if (!whoName.hidden) submitName();
-  else if (!codeStep.hidden) maybeSubmit();
+  maybeSubmit();
 });

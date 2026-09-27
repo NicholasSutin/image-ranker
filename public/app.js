@@ -6,6 +6,7 @@ const buttons = [...document.querySelectorAll(".choice")];
 const resultsLinks = [...document.querySelectorAll(".results-link")];
 const menuBtn = document.getElementById("menu-btn");
 const menuPop = document.getElementById("menu-pop");
+const doneDialog = document.getElementById("done-dialog");
 const MODES = { tiers: "mode-tiers", compare: "mode-compare" };
 let mode = null;
 
@@ -15,6 +16,7 @@ let current = null; // [a, b]
 let next = null;    // preloaded pair
 let votes = 0;
 let locked = false;
+let revising = false; // chose "Revise" for this set: don't nag after every re-rank
 
 const name = (src) => decodeURIComponent(src.split("/").pop());
 const display = (src) => `${src}?w=1600`; // resized by the Worker; originals are huge
@@ -68,6 +70,7 @@ async function pick(side) {
 
 function chooseSet(name) {
   set = name;
+  revising = false;
   resultsLinks.forEach((a) => { a.href = `/results?set=${encodeURIComponent(set)}`; });
   try { localStorage.setItem("set", set); } catch {}
   current = null;
@@ -95,7 +98,21 @@ function toggleMenu(open) {
   menuBtn.setAttribute("aria-expanded", open);
 }
 
-initTiers({ onChange: updateCount });
+// Finished ranking the set: offer the results instead of relying on the footer link.
+function finished() {
+  if (!revising && !doneDialog.open) doneDialog.showModal();
+}
+
+initTiers({ onChange: updateCount, onDone: finished });
+doneDialog.addEventListener("close", () => {
+  if (doneDialog.returnValue === "revise") revising = true;
+  doneDialog.returnValue = "";
+});
+// Escape and backdrop clicks count as "Revise".
+doneDialog.addEventListener("cancel", () => { revising = true; });
+doneDialog.addEventListener("click", (e) => {
+  if (e.target === doneDialog) { revising = true; doneDialog.close(); }
+});
 setMode();
 window.addEventListener("hashchange", setMode);
 menuBtn.addEventListener("click", () => toggleMenu(menuPop.hidden));
@@ -108,7 +125,7 @@ buttons.forEach((btn, i) => btn.addEventListener("click", () => pick(i)));
 document.getElementById("skip").addEventListener("click", () => current && show(next));
 setEl.addEventListener("change", () => chooseSet(setEl.value));
 document.addEventListener("keydown", (e) => {
-  if (e.target === setEl) return;
+  if (e.target === setEl || doneDialog.open) return;
   if (e.key === "Escape" && !menuPop.hidden) return toggleMenu(false);
   if (mode === "tiers") return tierKey(e);
   if (e.key === "ArrowLeft" || e.key === "ArrowUp") pick(0);

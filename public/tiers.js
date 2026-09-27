@@ -19,6 +19,7 @@ let drag = null;    // { id, x0, y0, moved, over }
 let tapOpen = false; // rows left open after a tap
 let busy = false;
 let onChange = () => {};
+let onDone = () => {};
 
 const name = (src) => decodeURIComponent(src.split("/").pop());
 // Resized by the Worker; the originals are far too big to drag around or show as thumbnails.
@@ -28,6 +29,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function initTiers(opts) {
   onChange = opts.onChange;
+  onDone = opts.onDone;
 }
 
 export function progress() {
@@ -129,8 +131,10 @@ async function assign(tier) {
   await sleep(320);
   row.classList.remove("hit");
   tapOpen = false;
-  show(nextUnplaced(src));
+  const next = nextUnplaced(src);
+  show(next);
   busy = false;
+  if (!next) onDone();
 }
 
 function undo() {
