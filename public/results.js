@@ -1,3 +1,5 @@
+import { save, saved } from "/save.js";
+
 const items = new Map(); // src -> result row, for the viewer caption
 const MIN_FAVORITES = 3;
 
@@ -8,7 +10,6 @@ let picking = false;
 let me = null;        // { id, name }
 let people = null;    // everyone's progress in this set
 let viewing = null;   // user id whose results are shown
-const pendingStars = new Set();
 
 const main = document.querySelector("main");
 const favPrompt = document.getElementById("fav-prompt");
@@ -273,7 +274,7 @@ function startPicking() {
 async function finishPicking() {
   picking = false;
   favDone.disabled = true;
-  await Promise.all(pendingStars); // make sure every pick is saved before finishing
+  await saved(); // make sure every pick is saved before finishing
   await fetch("/api/finish", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -293,15 +294,7 @@ function toggleStar(src) {
     if (img.dataset.src === src) img.parentElement.classList.toggle("mine", starred);
   }
   updateFavorites();
-  const req = fetch("/api/star", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ set, image: src, starred }),
-  }).then((res) => {
-    if (res.status === 401) location.replace("/login");
-  }).catch(() => {});
-  pendingStars.add(req);
-  req.finally(() => pendingStars.delete(req));
+  save("/api/star", { set, image: src, starred });
 }
 
 document.getElementById("fav-start").addEventListener("click", startPicking);

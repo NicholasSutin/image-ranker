@@ -83,8 +83,8 @@ async function maybeSubmit() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: code(), token, name: name(), invite: invite || null }),
     });
-    if (res.ok) return location.replace("/");
     const data = await res.json().catch(() => ({}));
+    if (res.ok) return location.replace(data.next || "/");
     errorEl.textContent = data.error || "Something went wrong.";
     inputs.forEach((i) => (i.value = ""));
     inputs[0].focus();

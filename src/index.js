@@ -23,7 +23,8 @@ export default {
     if (pathname === "/api/logout" && request.method === "POST") return logout();
     if (PUBLIC_PATHS.has(pathname)) return env.ASSETS.fetch(request);
 
-    const user = await readSession(request, env);
+    // Images skip the database check: they're requested in bulk and a signed cookie is enough to view them.
+    const user = await readSession(request, env, { checkUser: !pathname.startsWith("/sized/") });
     const invite = url.searchParams.get("invite");
     if (!user) {
       if (pathname.startsWith("/api/")) return json({ error: "unauthorized" }, 401);
@@ -122,7 +123,17 @@ async function login(request, env) {
     .run();
 
   const cookie = await createSession(env, id);
-  return json({ ok: true }, 200, { "Set-Cookie": cookie });
+  return json({ ok: true, next: await landingPage(env, id) }, 200, { "Set-Cookie": cookie });
+}
+
+// Someone who has already ranked a whole set goes straight to their results.
+async function landingPage(env, id) {
+  const { results: rows } = await env.DB.prepare("SELECT set_name, image FROM tiers WHERE session = ?").bind(id).all();
+  for (const [set, images] of Object.entries(manifest)) {
+    const placed = new Set(rows.filter((r) => r.set_name === set).map((r) => r.image));
+    if (images.length && images.every((src) => placed.has(src))) return `/results?set=${encodeURIComponent(set)}`;
+  }
+  return "/";
 }
 
 function logout() {
@@ -150,13 +161,17 @@ async function createSession(env, id) {
 }
 
 // Returns { id } for a valid cookie, else null.
-async function readSession(request, env) {
+// checkUser also requires the user to still exist, so a cookie signed for a database that has
+// since been recreated can't keep saving rankings under an id nobody can sign in as.
+async function readSession(request, env, { checkUser = true } = {}) {
   const match = (request.headers.get("Cookie") ?? "").match(new RegExp(`(?:^|;\\s*)${COOKIE}=([^;]+)`));
   if (!match) return null;
   const [id, exp, sig] = match[1].split(".");
   if (!id || !exp || !sig || Number(exp) < Date.now() / 1000) return null;
   const expected = await hmac(env.SESSION_SECRET, `${id}.${exp}`);
-  return (await safeEqual(sig, expected)) ? { id } : null;
+  if (!(await safeEqual(sig, expected))) return null;
+  if (checkUser && !(await env.DB.prepare("SELECT 1 FROM users WHERE id = ?").bind(id).first())) return null;
+  return { id };
 }
 
 async function hmac(secret, data) {

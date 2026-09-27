@@ -1,5 +1,7 @@
 // Tier mode: hold the image, the S / A / B / "Don't put on site" rows appear behind it,
 // drop it into one. Tapping (no drag) leaves the rows open so you can tap a row instead.
+import { save as post } from "/save.js";
+
 const card = document.getElementById("card");
 const board = document.getElementById("board");
 const rows = [...board.querySelectorAll(".tier")];
@@ -152,13 +154,7 @@ function undo() {
 }
 
 function save(image, tier) {
-  fetch("/api/tier", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ set, image, tier }),
-  }).then((res) => {
-    if (res.status === 401) location.replace("/login");
-  });
+  post("/api/tier", { set, image, tier });
 }
 
 // ---------- drag ----------

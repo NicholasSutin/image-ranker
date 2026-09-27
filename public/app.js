@@ -1,3 +1,4 @@
+import { save } from "/save.js";
 import { allRanked, initTiers, loadTiers, progress, tierKey } from "/tiers.js";
 
 const setEl = document.getElementById("set");
@@ -55,13 +56,7 @@ async function pick(side) {
   buttons[side].classList.add("picked");
   const winner = current[side];
   const loser = current[1 - side];
-  fetch("/api/vote", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ set, winner, loser }),
-  }).then((res) => {
-    if (res.status === 401) location.replace("/login");
-  });
+  save("/api/vote", { set, winner, loser });
   votes++;
   updateCount();
   await new Promise((r) => setTimeout(r, 180));
